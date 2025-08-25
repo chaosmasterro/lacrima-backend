@@ -1,4 +1,4 @@
- Core Django framework
+# Core Django framework
 Django>=5.0,<6.0
 
 # Production server

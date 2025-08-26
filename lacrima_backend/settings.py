@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-6x2-2_+pjyp#0)262537ix!e@&cq*uoh#!7g-5+_(2*v1s$v8*
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = ["*","api.lacrima.us","localhost","127.0.0.1"]
+ALLOWED_HOSTS = ["api.lacrima.us","localhost","127.0.0.1", "lacrima-backend.onrender.com"]
 
 
 # Application definition

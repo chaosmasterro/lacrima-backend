@@ -11,6 +11,8 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+import os
+from django.core.management.utils import get_random_secret_key
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -32,7 +34,7 @@ ALLOWED_HOSTS = ["api.lacrima.us","localhost","127.0.0.1", "lacrima-backend.onre
 ##ODDS_API_KEY = "ad43977f3bf10825f06aff4c9276dd9f" primary
 ODDS_API_KEY = "33f47a8fa76cafa701bf4aa00a749d3f"
 PLACEMENT_FEE_RATE = float(os.environ.get("PLACEMENT_FEE_RATE","0.02"))
-WIN_FEE_RATE = = float(os.environ.get("WIN_FEE_RATE","0.05"))
+WIN_FEE_RATE = float(os.environ.get("WIN_FEE_RATE","0.05"))
 
 INSTALLED_APPS = [
     'django.contrib.admin',

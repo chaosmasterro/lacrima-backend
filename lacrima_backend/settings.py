@@ -31,8 +31,9 @@ ALLOWED_HOSTS = ["api.lacrima.us","localhost","127.0.0.1", "lacrima-backend.onre
 
 
 # Application definition
-##ODDS_API_KEY = "ad43977f3bf10825f06aff4c9276dd9f" primary
-ODDS_API_KEY = "33f47a8fa76cafa701bf4aa00a749d3f"
+ODDS_API_KEY = "ad43977f3bf10825f06aff4c9276dd9f" 
+##primary
+##ODDS_API_KEY = "33f47a8fa76cafa701bf4aa00a749d3f"
 PLACEMENT_FEE_RATE = float(os.environ.get("PLACEMENT_FEE_RATE","0.02"))
 WIN_FEE_RATE = float(os.environ.get("WIN_FEE_RATE","0.05"))
 

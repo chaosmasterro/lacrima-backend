@@ -2,18 +2,29 @@ import json
 from django.http import JsonResponse, HttpResponseBadRequest
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from django.conf import settings
 from .models import Bet
 import requests
-from django.conf import settings
 
 def ping(request):
     return JsonResponse({"status": "ok"})
 
-DEFAULT_SPORTS = ["basketball_nba", "baseball_mlb", "soccer_epl"]  # e.g., add "soccer_usa_mls"
+DEFAULT_SPORTS = ["basketball_nba", "baseball_mlb", "soccer_epl"]
+
+def _as_float(value, default=None):
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+def _fee_rates():
+    placement = getattr(settings, "PLACEMENT_FEE_RATE", 0.02)
+    win = getattr(settings, "WIN_FEE_RATE", 0.05)
+    return placement, win
 
 @require_http_methods(["GET"])
 def bets_list(request):
-    bets = Bet.objects.all()
+    bets = Bet.objects.order_by("-created_at")
     data = [{
         "id": str(b.id),
         "eventId": b.event_id,
@@ -22,6 +33,11 @@ def bets_list(request):
         "sport": b.sport,
         "odds": b.odds,
         "stake": b.stake,
+        "placementFee": getattr(b, "placement_fee", 0.0),
+        "totalCharged": getattr(b, "total_charged", b.stake),
+        "winFeeRate": getattr(b, "win_fee_rate", getattr(settings, "WIN_FEE_RATE", 0.05)),
+        "vipXp": getattr(b, "vip_xp", 1),
+        "vipMultiplier": getattr(b, "vip_multiplier", 1.0),
         "status": b.status,
         "created_at": b.created_at.isoformat(),
     } for b in bets]
@@ -35,22 +51,24 @@ def place_bet(request):
     except Exception:
         return HttpResponseBadRequest("Invalid JSON")
 
-    # required
     event_id = body.get("eventId")
-    stake = body.get("stake")
-    team_a = body.get("teamA")
-    team_b = body.get("teamB")
-    sport = body.get("sport")
-    odds = body.get("odds")   # may be null
+    team_a   = body.get("teamA")
+    team_b   = body.get("teamB")
+    sport    = body.get("sport")
+    odds     = body.get("odds")            # may be null
+    stake    = _as_float(body.get("stake"))
 
-    if not event_id or not team_a or not team_b or not sport:
+    if not all([event_id, team_a, team_b, sport]) or stake is None:
         return HttpResponseBadRequest("Missing required fields")
-    try:
-        stake = float(stake)
-        if stake <= 0:
-            return HttpResponseBadRequest("Stake must be > 0")
-    except Exception:
-        return HttpResponseBadRequest("Invalid stake")
+    if stake <= 0:
+        return HttpResponseBadRequest("Stake must be > 0")
+
+    placement_rate, win_rate = _fee_rates()
+    placement_fee = round(stake * placement_rate, 2)
+    total_charged = round(stake + placement_fee, 2)
+
+    vip_xp = int(body.get("vipXp", 1))
+    vip_multiplier = _as_float(body.get("vipMultiplier"), 1.0) or 1.0
 
     bet = Bet.objects.create(
         event_id=event_id,
@@ -59,18 +77,33 @@ def place_bet(request):
         sport=sport,
         odds=odds,
         stake=stake,
+        placement_fee=placement_fee,
+        total_charged=total_charged,
+        vip_xp=vip_xp,
+        vip_multiplier=vip_multiplier,
+        win_fee_rate=win_rate,
         status="pending",
     )
-    return JsonResponse({"success": True, "id": str(bet.id)}, status=201)
 
+    return JsonResponse({
+        "success": True,
+        "id": str(bet.id),
+        "stake": bet.stake,
+        "placementFee": bet.placement_fee,
+        "totalCharged": bet.total_charged,
+        "winFeeRate": bet.win_fee_rate,
+        "vipXp": bet.vip_xp,
+        "vipMultiplier": bet.vip_multiplier,
+        "createdAt": bet.created_at.isoformat(),
+    }, status=201)
+
+@require_http_methods(["GET"])
 def events(request):
     """
     GET /api/events/?sports=basketball_nba,baseball_mlb,soccer_epl
     Returns normalized events for selected sports.
     """
     api_key = settings.ODDS_API_KEY
-
-    # Allow query param override, else use defaults
     raw = request.GET.get("sports")
     sports = [s.strip() for s in raw.split(",")] if raw else DEFAULT_SPORTS
 
@@ -78,15 +111,13 @@ def events(request):
     for sport in sports:
         url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds"
         params = {
-            "regions": "us",         # US books
-            "markets": "h2h",        # moneyline
-            "oddsFormat": "decimal", # your frontend assumes decimal like 1.85, 2.10, etc.
+            "regions": "us",
+            "markets": "h2h",
+            "oddsFormat": "decimal",
             "apiKey": api_key,
         }
-
         r = requests.get(url, params=params, timeout=15)
         if r.status_code != 200:
-            # Keep going for other sports but note the failure
             continue
 
         try:
@@ -98,16 +129,14 @@ def events(request):
             home = ev.get("home_team")
             away = ev.get("away_team")
             commence = ev.get("commence_time")
-            event_id = ev.get("id")  # Odds API event id
+            event_id = ev.get("id")
 
-            # Defensive odds extraction: bookmakers -> markets[h2h] -> outcomes (home/away)
             avg_price = None
             try:
                 bmk = ev["bookmakers"][0]
-                market = bmk["markets"][0]  # "h2h"
+                market = bmk["markets"][0]
                 outcomes = market.get("outcomes", [])
                 if outcomes:
-                    # If we want a single number for UI, use the average of the two prices
                     prices = [o.get("price") for o in outcomes if isinstance(o.get("price"), (int, float))]
                     if prices:
                         avg_price = round(sum(prices) / len(prices), 2)
@@ -116,12 +145,11 @@ def events(request):
 
             all_events.append({
                 "id": event_id,
-                "teamA": away,         # you can flip these if you prefer home first
+                "teamA": away,   # flip if you prefer home first
                 "teamB": home,
                 "sport": sport,
-                "odds": avg_price,     # single number for your current UI
+                "odds": avg_price,
                 "start_time": commence,
             })
 
     return JsonResponse(all_events, safe=False)
-   
